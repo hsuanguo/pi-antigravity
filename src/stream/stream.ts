@@ -312,6 +312,7 @@ export function convertMessages(
 ): GeminiContent[] {
   const contents: GeminiContent[] = [];
   const requiresSig = geminiRequiresThoughtSignature(runtimeModel);
+  const isClaude = model.id.startsWith("claude-") || runtimeModel.startsWith("claude-");
   const droppedToolCallIds = new Map<string, string>();
   for (const msg of context.messages) {
     if ((msg.role as string) === "system") continue;
@@ -416,8 +417,27 @@ export function convertMessages(
               : {}),
           },
         };
-        appendTurn(contents, GeminiRole.User, [part, ...imageParts]);
+        appendTurn(contents, GeminiRole.User, [
+          part,
+          ...(isClaude && imageParts.length > 0
+            ? [{ text: `Images from tool ${msg.toolName} (${sanitizedId}):` }]
+            : []),
+          ...imageParts,
+        ]);
       }
+    }
+  }
+
+  if (isClaude) {
+    // Cloud Code Assist bridges these parts to Claude tool_result blocks. Every
+    // result in a parallel batch must precede ordinary text/images; an image
+    // between results can make the following result appear missing to Claude.
+    // Keep the remaining parts in order, including each image's source label.
+    for (const turn of contents) {
+      if (turn.role !== GeminiRole.User) continue;
+      const responses = turn.parts.filter((part) => "functionResponse" in part);
+      if (responses.length === 0) continue;
+      turn.parts = [...responses, ...turn.parts.filter((part) => !("functionResponse" in part))];
     }
   }
 
@@ -1035,6 +1055,9 @@ function recordStaticRouteDiagnostics(runtimeModel: string): void {
 export function friendlyAntigravityError(status: number | undefined, text: string): string {
   const msg = redactSecrets(jsonOrTextError(text)).slice(0, 500);
   if (status === 400) {
+    if (/tool_use.*without.*tool_result/i.test(msg)) {
+      return `Antigravity rejected the conversation's tool-call/result sequence (${msg}). Next: report this history-format error or start a new session; re-login is not required.`;
+    }
     if (/Requests ending with a model turn are not supported/i.test(msg)) {
       return "Antigravity rejected an invalid conversation message boundary. Next: update the extension or add a user message / start a new session, then retry.";
     }

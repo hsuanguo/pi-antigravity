@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Claude image tool results:** Keep all parallel tool results before images and ordinary text, retaining image source labels, to prevent missing `tool_result` HTTP 400 errors when reading multiple screenshots. History-format errors no longer suggest re-authentication.
+
 ## [0.11.0] - 2026-10-16
 
 ### Added
